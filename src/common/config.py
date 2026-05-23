@@ -2,7 +2,68 @@
 
 import os
 import json
+import re
 from typing import Any, Dict, Optional
+
+
+# Sensitive key patterns for redaction
+_SENSITIVE_PATTERNS = [
+    re.compile(r'password', re.IGNORECASE),
+    re.compile(r'secret', re.IGNORECASE),
+    re.compile(r'token', re.IGNORECASE),
+    re.compile(r'key', re.IGNORECASE),
+    re.compile(r'credential', re.IGNORECASE),
+    re.compile(r'auth', re.IGNORECASE),
+    re.compile(r'private', re.IGNORECASE),
+    re.compile(r'api_key', re.IGNORECASE),
+    re.compile(r'apikey', re.IGNORECASE),
+    re.compile(r'access_token', re.IGNORECASE),
+    re.compile(r'refresh_token', re.IGNORECASE),
+]
+
+_REDACTED_PLACEHOLDER = "***REDACTED***"
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """Check if a config key looks sensitive and should be redacted."""
+    for pattern in _SENSITIVE_PATTERNS:
+        if pattern.search(key):
+            return True
+    return False
+
+
+def _redact_value(key: str, value: Any) -> Any:
+    """Redact a single value if the key looks sensitive."""
+    if _is_sensitive_key(key):
+        return _REDACTED_PLACEHOLDER
+    return value
+
+
+def _redact_dict(data: Dict, prefix: str = "") -> Dict:
+    """Recursively redact sensitive values in a dict."""
+    result = {}
+    for key, value in data.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            result[key] = _redact_dict(value, full_key)
+        else:
+            result[key] = _redact_value(full_key, value)
+    return result
+
+
+def _coerce_value(value: str) -> Any:
+    """Coerce string value to appropriate type (int, float, bool, or string)."""
+    if value.lower() in ('true', 'false'):
+        return value.lower() == 'true'
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    return value
 
 
 class Config:
@@ -21,7 +82,7 @@ class Config:
         for key, value in os.environ.items():
             if key.startswith(prefix):
                 config_key = key[len(prefix):].lower().replace("_", ".")
-                self._set_nested(config_key, value)
+                self._set_nested(config_key, _coerce_value(value))
 
     def _set_nested(self, key: str, value: Any) -> None:
         parts = key.split(".")
@@ -50,114 +111,14 @@ class Config:
     def to_dict(self) -> Dict:
         return self._data
 
-# 2019-03-14T15:29:32 update
+    def to_redacted_dict(self) -> Dict:
+        """Return a redacted copy of the config with sensitive values masked.
 
-# 2019-05-06T15:01:41 update
+        Keys matching sensitive patterns (password, secret, token, key,
+        credential, auth, private, api_key, access_token, refresh_token)
+        are replaced with '***REDACTED***'.
 
-# 2019-07-12T09:57:32 update
-
-# 2019-08-30T16:15:51 update
-
-# 2019-08-30T19:29:48 update
-
-# 2019-11-29T18:40:08 update
-
-# 2020-01-06T17:10:44 update
-
-# 2020-01-23T10:35:15 update
-
-# 2020-04-27T16:39:24 update
-
-# 2020-05-26T16:41:05 update
-
-# 2020-07-19T11:00:28 update
-
-# 2021-02-26T14:06:47 update
-
-# 2021-04-25T15:41:25 update
-
-# 2021-05-03T10:13:52 update
-
-# 2021-05-25T19:02:26 update
-
-# 2021-07-20T13:34:30 update
-
-# 2021-09-23T13:29:24 update
-
-# 2021-11-12T13:25:31 update
-
-# 2022-01-07T11:55:24 update
-
-# 2022-03-08T17:13:29 update
-
-# 2022-03-09T12:33:27 update
-
-# 2022-03-24T14:25:02 update
-
-# 2022-04-12T20:49:22 update
-
-# 2022-04-13T15:58:33 update
-
-# 2022-06-03T19:19:58 update
-
-# 2022-09-27T19:11:22 update
-
-# 2022-11-16T19:38:41 update
-
-# 2022-12-19T10:51:08 update
-
-# 2022-12-24T10:03:34 update
-
-# 2023-01-05T20:57:10 update
-
-# 2023-02-02T10:54:16 update
-
-# 2023-02-07T11:41:49 update
-
-# 2023-02-24T17:40:44 update
-
-# 2023-03-31T13:02:20 update
-
-# 2023-05-29T19:56:24 update
-
-# 2023-09-16T09:50:57 update
-
-# 2023-11-22T08:33:39 update
-
-# 2023-12-28T20:23:43 update
-
-# 2024-02-19T11:33:12 update
-
-# 2024-05-09T14:00:07 update
-
-# 2024-06-28T11:57:44 update
-
-# 2024-09-05T13:13:46 update
-
-# 2024-09-06T09:08:29 update
-
-# 2024-09-08T20:18:45 update
-
-# 2024-10-09T08:26:36 update
-
-# 2024-11-28T15:26:38 update
-
-# 2024-12-04T19:45:11 update
-
-# 2025-03-07T15:33:54 update
-
-# 2025-07-11T11:44:03 update
-
-# 2025-08-06T12:39:27 update
-
-# 2025-09-17T08:36:34 update
-
-# 2025-10-08T10:41:39 update
-
-# 2025-10-20T15:13:02 update
-
-# 2026-01-12T19:44:27 update
-
-# 2026-02-06T14:54:33 update
-
-# 2026-04-10T20:09:37 update
+        Use this for diagnostic output and logs. Use to_dict() for
+        trusted internal access.
+        """
+        return _redact_dict(self._data)
