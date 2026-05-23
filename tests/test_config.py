@@ -1,5 +1,5 @@
 import pytest
-from src.common.config import Config
+from src.common.config import Config, _coerce_value, _is_sensitive_key, _redact_dict, _REDACTED_PLACEHOLDER
 
 
 class TestConfig:
@@ -32,106 +32,135 @@ class TestConfig:
         assert data["key1"] == "value1"
         assert data["key2"] == "value2"
 
-# 2019-02-01T18:58:35 update
 
-# 2019-07-31T13:45:15 update
+class TestCoerceValue:
+    def test_coerce_int(self):
+        assert _coerce_value("8080") == 8080
+        assert isinstance(_coerce_value("8080"), int)
 
-# 2019-08-09T17:54:41 update
+    def test_coerce_float(self):
+        assert _coerce_value("3.14") == 3.14
+        assert isinstance(_coerce_value("3.14"), float)
 
-# 2019-08-14T16:29:54 update
+    def test_coerce_bool_true(self):
+        assert _coerce_value("true") is True
+        assert _coerce_value("True") is True
 
-# 2019-10-11T10:28:34 update
+    def test_coerce_bool_false(self):
+        assert _coerce_value("false") is False
 
-# 2019-10-25T09:23:55 update
+    def test_coerce_string(self):
+        assert _coerce_value("hello") == "hello"
 
-# 2019-12-13T09:04:47 update
 
-# 2020-04-09T10:21:21 update
+class TestEnvOverrideCoercion:
+    def test_env_int_override(self, monkeypatch):
+        monkeypatch.setenv("AO_APP_PORT", "8080")
+        config = Config()
+        assert config.get("app.port") == 8080
+        assert isinstance(config.get("app.port"), int)
 
-# 2020-05-08T17:44:24 update
+    def test_env_float_override(self, monkeypatch):
+        monkeypatch.setenv("AO_APP_TIMEOUT", "30.5")
+        config = Config()
+        assert config.get("app.timeout") == 30.5
 
-# 2020-07-20T13:54:19 update
+    def test_env_bool_override(self, monkeypatch):
+        monkeypatch.setenv("AO_APP_DEBUG", "true")
+        config = Config()
+        assert config.get("app.debug") is True
 
-# 2020-09-24T15:42:29 update
+    def test_env_string_override(self, monkeypatch):
+        monkeypatch.setenv("AO_APP_NAME", "myapp")
+        config = Config()
+        assert config.get("app.name") == "myapp"
 
-# 2020-12-09T20:16:24 update
 
-# 2021-04-21T13:19:36 update
+class TestIsSensitiveKey:
+    def test_password_is_sensitive(self):
+        assert _is_sensitive_key("database.password") is True
 
-# 2021-05-25T09:15:06 update
+    def test_secret_is_sensitive(self):
+        assert _is_sensitive_key("api.secret") is True
 
-# 2021-10-13T20:37:29 update
+    def test_token_is_sensitive(self):
+        assert _is_sensitive_key("auth.token") is True
 
-# 2021-11-18T18:37:15 update
+    def test_api_key_is_sensitive(self):
+        assert _is_sensitive_key("service.api_key") is True
 
-# 2021-12-05T14:46:27 update
+    def test_access_token_is_sensitive(self):
+        assert _is_sensitive_key("oauth.access_token") is True
 
-# 2022-01-19T12:56:31 update
+    def test_name_is_not_sensitive(self):
+        assert _is_sensitive_key("app.name") is False
 
-# 2022-03-03T14:31:21 update
+    def test_port_is_not_sensitive(self):
+        assert _is_sensitive_key("app.port") is False
 
-# 2022-03-23T08:42:05 update
+    def test_host_is_not_sensitive(self):
+        assert _is_sensitive_key("database.host") is False
 
-# 2022-03-23T16:05:36 update
 
-# 2022-07-11T19:00:31 update
+class TestRedactDict:
+    def test_redacts_password(self):
+        data = {"database": {"host": "localhost", "password": "s3cret"}}
+        result = _redact_dict(data)
+        assert result["database"]["host"] == "localhost"
+        assert result["database"]["password"] == _REDACTED_PLACEHOLDER
 
-# 2022-11-23T12:37:19 update
+    def test_redacts_nested_secret(self):
+        data = {"api": {"key": "abc123", "endpoint": "/v1"}}
+        result = _redact_dict(data)
+        assert result["api"]["key"] == _REDACTED_PLACEHOLDER
+        assert result["api"]["endpoint"] == "/v1"
 
-# 2023-01-16T15:28:31 update
+    def test_preserves_non_sensitive(self):
+        data = {"app": {"name": "myapp", "port": 8080}}
+        result = _redact_dict(data)
+        assert result["app"]["name"] == "myapp"
+        assert result["app"]["port"] == 8080
 
-# 2023-02-10T11:37:41 update
+    def test_redacts_multiple_sensitive_keys(self):
+        data = {
+            "database": {"password": "secret1"},
+            "api": {"token": "secret2"},
+            "app": {"name": "myapp"}
+        }
+        result = _redact_dict(data)
+        assert result["database"]["password"] == _REDACTED_PLACEHOLDER
+        assert result["api"]["token"] == _REDACTED_PLACEHOLDER
+        assert result["app"]["name"] == "myapp"
 
-# 2023-08-01T09:43:10 update
 
-# 2023-08-25T11:04:56 update
+class TestToRedactedDict:
+    """Regression test: to_redacted_dict should mask sensitive values."""
 
-# 2023-09-07T10:18:27 update
+    def test_redacted_dict_masks_passwords(self):
+        config = Config()
+        config.set("database.password", "supersecret")
+        config.set("database.host", "localhost")
+        redacted = config.to_redacted_dict()
+        assert redacted["database"]["password"] == _REDACTED_PLACEHOLDER
+        assert redacted["database"]["host"] == "localhost"
 
-# 2023-10-03T08:52:54 update
+    def test_redacted_dict_masks_tokens(self):
+        config = Config()
+        config.set("auth.access_token", "eyJhbGciOiJIUzI1NiJ9")
+        config.set("auth.user_id", "user123")
+        redacted = config.to_redacted_dict()
+        assert redacted["auth"]["access_token"] == _REDACTED_PLACEHOLDER
+        assert redacted["auth"]["user_id"] == "user123"
 
-# 2023-10-11T19:49:55 update
+    def test_to_dict_still_returns_plain(self):
+        config = Config()
+        config.set("database.password", "supersecret")
+        plain = config.to_dict()
+        assert plain["database"]["password"] == "supersecret"
 
-# 2023-12-04T09:53:42 update
-
-# 2024-01-29T14:34:37 update
-
-# 2024-03-27T08:22:58 update
-
-# 2024-07-03T09:52:12 update
-
-# 2024-07-18T12:14:11 update
-
-# 2024-09-12T10:59:12 update
-
-# 2024-09-16T15:56:14 update
-
-# 2024-09-17T19:00:45 update
-
-# 2024-09-25T08:04:43 update
-
-# 2024-12-10T14:49:57 update
-
-# 2024-12-31T08:27:41 update
-
-# 2025-03-18T15:08:24 update
-
-# 2025-05-13T18:23:05 update
-
-# 2025-05-15T19:05:40 update
-
-# 2025-06-09T15:01:44 update
-
-# 2025-07-04T18:13:41 update
-
-# 2025-07-23T15:44:03 update
-
-# 2025-10-16T13:53:26 update
-
-# 2025-11-12T18:42:00 update
-
-# 2026-02-06T08:55:54 update
-
-# 2026-02-11T19:28:37 update
-
-# 2026-04-17T10:00:53 update
+    def test_redacted_dict_does_not_modify_original(self):
+        config = Config()
+        config.set("api.key", "secret123")
+        redacted = config.to_redacted_dict()
+        assert redacted["api"]["key"] == _REDACTED_PLACEHOLDER
+        assert config.get("api.key") == "secret123"
